@@ -1,0 +1,928 @@
+311 Analysis
+================
+
+This set of scripts outputs standardized 311 analysis for a given property. It is intended to be expanded significantly.
+
+The first script "readin\_munge" ingests 311, PLUTO, ACS, Intercensal and pediacities shapefiles to create a standardized workspace from which 311 analyses are launched.
+
+The second script "calculation" generates summary statistics for varying geographies of interest: NYC, Borough, Neighborhood and both 1/4 mile and 1/8 mile radiuses around specified properties. It outputs total volume of calls per year, calls per person per year and calls per residential unit per year within the aforementioned geographic levels. Currently visualizations are handled in Excel.
+
+"SF functions" contains two functions requisite for the primary scripts
+
+SF functions
+============
+
+Population within a given radius
+--------------------------------
+
+The first function takes arguments for coordinates (lat.bldg and long.bldg), population data (acs\_tract\_pops), corresponding population data shapefiles (acs\_tract\_shapes.tmp), the radius around which we are finding population for (mile.radius) and the variable by which the population data and shapefiles are joined. The last argument can be safely ignored.
+
+Importantly, lat.bldg and long.bldg do not need be scalar. The function is designed to take in two vectors of coordinates so that these calculations can be run for a portfolio of properties and not just an individual property. In the calculation script this will be a dataframe of pluto target lats and longs.
+
+One possible issue to be explored in the future is that I believe raw census shapefiles extend into waterways. However, our PediaCities shapefiles are clipped to land boundaries. If this is the case it is possible that census tracts along the water are not allotting their full population to neighborhoods.
+
+The functions require use of both sf and dplyr
+
+``` r
+popradius.fun <- function(lat.bldg = 40.72432
+                          ,long.bldg = -73.84847
+                          ,acs_tract_pops = acs_tract_pops.tmp
+                          ,acs_tract_shapes = acs_tract_shapes.tmp
+                          ,mile.radius = .125
+                          ,join_by_var = "GISJOIN"){
+  
+    require(sf)
+  require(dplyr)
+```
+
+First create a dataframe of the target latitudes and longitudes and convert to a plane type coordinate system. The nature of WGS84 does not allow a simple circle to be easily drawn around a point so latitude/longitude will come out to an ellipse. After this simple features dataframe is made, a polygons of circles are drawn around the coordinates originally fed in.
+
+``` r
+  dat_sim <- data.frame(cbind(long.bldg,lat.bldg))
+  
+  dat_sf <- st_as_sf(dat_sim, coords = c("long.bldg", "lat.bldg"), crs = 4326) %>% 
+    st_transform(3035)
+  
+  ## drawing a circle around coordinates, converting the mile specification to meters
+  circle.map <- st_buffer(dat_sf
+                          ,dist = 1000/.62137 * mile.radius
+  )
+```
+
+The census tract shapefiles are converted to a plane coordinate system. After this the sf dataframe is reduced to only the polygons that have area within the previously drawn circles
+
+``` r
+  curr.shape <- acs_tract_shapes %>% 
+    st_transform(3035)
+  
+  ## which census tracts fall within the circle
+  curr.shape <- curr.shape[unlist(st_intersects(circle.map,curr.shape,sparse=T)),]
+```
+
+Calculate the proportion of the census tracts which are within our circles and join with the acs population data
+
+``` r
+  props <- as.numeric(
+    st_area(
+      st_intersection(curr.shape,st_union(circle.map))
+    )
+  )/
+    as.numeric(st_area(curr.shape))
+  
+  curr.shape[,"props"] <- props
+  
+  if(join_by_var=="GISJOIN"){
+    dat <- left_join(
+      curr.shape %>% 
+        mutate(GISJOIN = as.character(GISJOIN))
+      ,acs_tract_pops
+      ,by=join_by_var
+    )
+  } else {
+    dat <- left_join(
+      curr.shape
+      ,acs_tract_pops
+      ,by=join_by_var
+    )
+  }
+```
+
+Return a scalar of population within the circles
+
+``` r
+  pop <- as.numeric(
+    as.data.frame(
+      dat %>% 
+        summarize(pop = sum(Population * props)) 
+    ) %>% 
+      select(pop)
+  )
+  
+  return(pop)
+}
+```
+
+Observations within a given radius
+----------------------------------
+
+Similar to the initial function, this function simply identifies all geotagged observations which are within a given radius or target coordinates
+
+This function takes arguments for target coordinates (target.lats and target.longs), dataframe the operation is being performed on (df), name of the Id variable in the dataframe (df\_keycol), the names of coordinate variables within the dataframe (df\_latcol and df\_longcol), desired radius (mile.radius) and a logical variable for whether to return the Ids of observations within the area or to return a full dataframe. It also requires sf and dplyr
+
+If returning an entire dataframe is is suggested to be judicious in only passing in neccessary variables as simple features dataframes take up a large amount of memory.
+
+``` r
+obs_within_radius.fun <- function(target.lats
+                                  ,target.longs
+                                  ,df=full.311
+                                  ,df_keycol = "BBL"
+                                  ,df_latcol = "Latitude"
+                                  ,df_longcol = "Longitude"
+                                  ,mile.radius = .125
+                                  ,return_keys = T
+                                  ){
+  require(sf)
+  require(dplyr)
+```
+
+As before, create a dataframe of the target coordinates on a plane system, convert to simple features dataframe and create polygons of circles around the given coordinates
+
+``` r
+  dat_sim <- data.frame(cbind(target.longs,target.lats))
+  
+  dat_sf <- st_as_sf(dat_sim, coords = c("target.longs", "target.lats"), crs = 4326) %>% 
+    st_transform(3035)
+  
+  ## drawing a circle around coordinates, converting the mile specification to meters
+  circle.map <- st_union(
+    st_buffer(dat_sf
+              ,dist = 1000/.62137 * mile.radius
+    )
+  )
+```
+
+Create a logical vector of whether an observation is within the radius or not and combine with the initial dataframe. Return either Ids or the full dataframe.
+
+``` r
+  derp <- st_intersects(st_as_sf(df
+                                 , coords = c(df_longcol,df_latcol), crs = 4326) %>% 
+                          st_transform(3035)
+                        ,circle.map
+                        ,sparse=F
+  )
+  
+  df[,
+     paste(
+       "radius"
+       ,mile.radius
+       ,sep=""
+     )
+     ] <- derp[,1]
+  
+  cat("Time to find observations within radius:\n", (proc.time() - ptm)[3],sep="")
+  if(return_keys==T){
+    keep.keys <- df[derp[,1],df_keycol]
+    return(keep.keys)
+  }else{
+    return(df)
+  }  
+}
+```
+
+readin\_munge
+=============
+
+Read in the pediacities shapefiles and set coordinate system to WGS84
+
+``` r
+## read in pedia map 
+pediashape.url <- "http://data.beta.nyc//dataset/0ff93d2d-90ba-457c-9f7e-39e47bf2ac5f/resource/35dd04fb-81b3-479b-a074-a27a37888ce7/download/d085e2f8d0b54d4590b1e7d1f35594c1pediacitiesnycneighborhoods.geojson"
+
+pedia.map <- geojson_read(as.location(pediashape.url),
+                          method="local",
+                          what="sp")
+
+pedia.map <- st_as_sf(pedia.map,crs=4326)
+```
+
+sf operations appear more memory hungry than the method previously used and seems to utilize memory even after large objects are removed and explicit garbage collection is called. On machines with less RAM or should the dataset increase in size running out of RAM slows the process to unacceptable levels. To deal with this issue, the most memory intensive operations are conducted first and only necessary data is brought into the workspace. Explicit garbage collection is used before and after large sf operations.
+
+``` r
+## Read in current 311 data
+tmp.df <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/ad_hoc/Bronx 1000/311data.rds") %>% 
+  filter(!is.na(Longitude) | is.na(Latitude)) %>% 
+  select(Unique.Key,Longitude,Latitude)
+
+tmp.df <- st_as_sf(tmp.df, coords = c("Longitude", "Latitude"), crs = 4326)
+
+tmp.df <- st_join(tmp.df
+                  ,pedia.map) %>% 
+  select(Unique.Key,neighborhood)
+gc()
+```
+
+Full 311 dataset is brought in and joined with its smaller variant that now contains neighborhood for each call.
+
+``` r
+## bring back in the 311 data
+full.311 <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/ad_hoc/Bronx 1000/311data.rds") %>% 
+  filter(!is.na(Longitude)) %>% 
+  select(Unique.Key
+         ,Created.Date
+         ,Agency
+         ,Complaint.Type
+         ,Descriptor
+         ,Status
+         ,Incident.Zip
+         ,Incident.Address
+         ,Street.Name
+         ,City
+         ,Borough
+         ,Latitude
+         ,Longitude
+         ,Location)
+
+full.311 <- left_join(full.311
+                      ,tmp.df %>% 
+                        select(Unique.Key,neighborhood)
+                      ,by="Unique.Key") %>% 
+  rename(Neighborhood = neighborhood)
+
+full.311 <- full.311 %>% 
+  select(-geometry)
+
+rm(tmp.df)
+gc()
+```
+
+Because many 311 observations are missing a variable for Borough, pluto is brough in midstream to be used in a join and correct the 311 dataframe Borough field.
+
+All pluto CSVs are read in list-wise and joined using the standard BBL manipulation along with fixing the Condo Number field and creating a variable with just the first letter of building class.
+
+``` r
+## Read in pluto
+cl <- makeCluster(detectCores()-1,type="FORK")
+
+pluto.files <- list.files("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/nyc_pluto_16v2",
+                          pattern=".csv",
+                          full.names=T)
+
+pluto.list <- parLapply(cl, pluto.files, function(x)
+  read.csv(x,
+           stringsAsFactors=F)
+  )
+
+stopCluster(cl)
+
+pluto <- bind_rows(pluto.list) %>% 
+  select(BBL,Borough,Block,Lot,ZipCode,Address,SplitZone,BldgClass,LandUse,Easements,OwnerType,
+         OwnerName,BldgArea,ComArea,ResArea,OfficeArea,RetailArea,GarageArea,StrgeArea,
+         FactryArea,OtherArea,AreaSource,NumBldgs,NumFloors,UnitsRes,UnitsTotal,YearBuilt,
+         CondoNo,XCoord,YCoord) %>% 
+  mutate(BBL= paste(substr(BBL,start=1,stop=1),
+                    Block,
+                    Lot,
+                    sep="_"),
+         CondoNo= ifelse(CondoNo==0,
+                         0,
+                         paste(str_sub(BBL,start=1,end=1),CondoNo,sep="_")),
+         BldgClass_1 = str_sub(BldgClass,start=1,end=1)
+  )
+rm(pluto.list)
+```
+
+Drop out observations with missing coordinates for a temporary dataframe. Identify NY State Plane Coordinate system and convert to WGS84. Join with PediaCities to get neighborhood, convert geometry column into coordinates to get lat/long and then join the resulting dataframe with pluto.
+
+``` r
+## Adding neighborhood to pluto 
+tmp.df <- pluto %>% 
+  filter(!is.na(XCoord)) %>% 
+  select(BBL,XCoord,YCoord)
+tmp.df <- st_as_sf(tmp.df, coords = c("XCoord", "YCoord"), crs = 102718) %>% 
+  st_transform(4326)
+
+tmp.df <- st_join(tmp.df
+                  ,pedia.map)
+
+tmp.df <- as.data.frame(
+  bind_cols(tmp.df
+            ,as.data.frame(st_coordinates(tmp.df))
+  )
+  ,stringsAsFactors=F) %>% 
+  rename(
+    latitude = Y
+    ,longitude = X
+  )
+
+pluto <- left_join(
+  pluto
+  ,tmp.df %>% 
+    select(BBL,neighborhood,latitude,longitude) %>%
+    rename(Neighborhood = neighborhood)
+  ,by="BBL"
+)
+```
+
+Putting Borough into the missing spots within the 311 dataframe by joining with pluto. Current method is slightly convoluted and should be updated in future variants. At the moment the prototype method from a few months ago is utilized for the sake of expedience.
+
+``` r
+## 311 data missing Borough in some instances 
+## Filling in the NA obs via pluto and neighborhood
+boro_pl.levs <- levels(factor(pluto[,"Borough"]))
+boro_311.levs <- levels(factor(full.311[,"Borough"]))
+boro_311.levs <- boro_311.levs[!boro_311.levs %in% "Unspecified"]
+
+boro_pl.levs.mat <- cbind(
+  substr(boro_pl.levs,start=1,stop=1)
+  ,substr(boro_pl.levs,start=2,stop=2)
+)
+
+boro_levs.match_order <- unlist(lapply(1:nrow(boro_pl.levs.mat), function(x){
+  which(
+    grepl(boro_pl.levs.mat[x,1],boro_311.levs,ignore.case=T) &
+      grepl(boro_pl.levs.mat[x,2],boro_311.levs,ignore.case=T)
+  )}
+)
+)
+
+full.311 <- left_join(
+  full.311
+  ,pluto %>% 
+    filter(!is.na(Neighborhood) & !is.na(Borough) & !duplicated(Neighborhood)) %>% 
+    mutate(Borough = factor(Borough 
+                            ,levels = boro_pl.levs
+                            ,labels = boro_311.levs[boro_levs.match_order])) %>%
+    select(Neighborhood,Borough) %>%
+    rename(Borough.pl = Borough)
+  ,by="Neighborhood")
+
+full.311 <- full.311 %>% 
+  mutate(
+    Borough.new = ifelse(
+      (Borough == "Unspecified" | is.na(Borough))
+      ,as.character(Borough.pl)
+      ,as.character(Borough)
+    )
+  ) %>% 
+  rename(Borough.orig = Borough
+         ,Borough = Borough.new) %>% 
+  select(-Borough.pl)
+```
+
+311 calls pertaining to similar issues (such as trash complaints) are routed to various agencies each of which has their own coding scheme. For trash complaints and pest complaints, the following lists of complaint types are utilized.
+
+``` r
+## dataframe identifying all the different complaint types
+n_full.311 <- nrow(full.311)
+descriptor.levs <- full.311 %>% 
+  group_by(Complaint.Type) %>% 
+  mutate(complaint_count = n()) %>% 
+  group_by(Complaint.Type,Descriptor) %>% 
+  mutate(Year=as.numeric(year(Created.Date))
+  ) %>%
+  summarize(
+    Complaint.levs = length(unique(as.character(Complaint.Type)))
+    ,Complaint_type.count = mean(complaint_count,na.rm=T)
+    ,Descriptor.count = n()
+    ,Descriptor.prop_type = n()/Complaint_type.count
+    ,Descriptor.prop_all = n()/n_full.311
+    ,Agency.levs = length(unique(as.character(Agency)))
+    ,Agencies = ifelse(Agency.levs==1
+                       ,unique(as.character(Agency))
+                       ,paste(unique(as.character(Agency)),collapse="; "))
+  ) %>% 
+  select(-Complaint.levs
+         ,Agency.levs
+  ) %>% 
+  arrange(desc(
+    Descriptor.count
+  )
+  )
+
+
+## Complaints currently classifying as trash complaints 
+trash.descriptors <- c("E3 Dirty Sidewalk"
+                       ,"E3A Dirty Area/Alleyway"
+                       ,"E5 Loose Rubbish"
+                       ,"E7 Private Carter Spillage"
+                       ,"E11 Litter Surveillance"
+                       ,"6 Overflowing Litter Baskets"
+                       ,"15 Street Cond/Dump-Out/Drop-Off"
+                       ,"12 Dead Animals"
+                       ,"Litter"
+)
+
+## Complaints currently classifying as pest complaints 
+pest.descriptors <- as.character(as.data.frame(descriptor.levs %>% 
+                                                 filter(grepl("rodent",Complaint.Type,ignore.case=T) | grepl("rodent",Descriptor,ignore.case=T)
+                                                        | grepl("vermin",Complaint.Type,ignore.case=T) | grepl("vermin",Descriptor,ignore.case=T)
+                                                        | grepl("rat ",Complaint.Type,ignore.case=T) | grepl("rat ",Descriptor,ignore.case=T)
+                                                        | grepl("insect",Complaint.Type,ignore.case=T) | grepl("insect",Descriptor,ignore.case=T)
+                                                        | grepl("mice",Complaint.Type,ignore.case=T) | grepl("mice",Descriptor,ignore.case=T)
+                                                        | grepl("pests",Complaint.Type,ignore.case=T) | grepl("pests",Descriptor,ignore.case=T)
+                                                 )
+                                               ,stringsAsFactors=F)[,"Descriptor"]
+)
+```
+
+Population data for Borough
+
+``` r
+## Borough population 
+boro_pops <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/ad_hoc/Bronx 1000/Data/Borough Populations 2010_2016.csv"
+                      ,stringsAsFactors=F)
+
+colnames(boro_pops) <- gsub("\\."," ",colnames(boro_pops))
+
+boro_pops.list <- lapply(2:ncol(boro_pops), function(x){
+  out <- as.data.frame(cbind(boro_pops[,c(1,x)],colnames(boro_pops)[x])
+                       ,stringsAsFactors=F)
+  colnames(out) <- c("Year","Population","Borough")
+  return(out)
+}
+)
+
+boro_pops <- bind_rows(boro_pops.list)
+```
+
+Neighborhood is more complex. Currently uses the neighborhood to census tract link table. This link table assigns each census tract to a neighborhood based on which neighborhood contains the greatest amount of said census tract. Future iterations will use a more sophisticated method which apportions the proportion of a census tracts population equivalent to its are within a neighborhood to said neighborhood.
+
+After census tract populations are read in, 2016 is imputed and values are assigned to neighborhoods via the aforementioned link table.
+
+Forest Park kept coming up as being in Brooklyn (our neighborhood level shapefiles do put part of it in Brooklyn). To avoid putting too much time into something that only needs to be run once, it is manually coded as Queens.
+
+``` r
+## Neighborhood population 
+acs_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/Census/Population Estimates/ACS_Population_CT2010_2010_2015.rds")
+acs_pops <- acs_pops %>% 
+  mutate(Population = as.numeric(Population)
+  )
+
+## Inpute population for 2016 (2015 + average increase of prior two years)
+acs_pops.tmp2 <- acs_pops %>% 
+  filter(Year > 2012) %>%
+  group_by(BoroCT2010) %>% 
+  summarize(mean_increase = (Population[Year==max(Year)] - Population[Year==min(Year)])
+            /(max(Year)-min(Year))) %>% 
+  filter(!duplicated(BoroCT2010)) %>% 
+  select(BoroCT2010,mean_increase)
+
+acs_pops.2016 <- left_join(acs_pops %>% 
+                             filter(Year==2015)
+                           ,acs_pops.tmp2
+                           ,by="BoroCT2010"
+) %>% mutate(
+  mean_increase = ifelse(is.na(mean_increase)
+                         ,0
+                         ,mean_increase
+  )
+  ,Population = round(Population + mean_increase)
+  ,Year=2016
+) %>% 
+  select(-mean_increase)
+
+acs_pops <- bind_rows(acs_pops,acs_pops.2016)
+
+## Link table for acs tract and neighborhood 
+Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
+                             stringsAsFactors=F) %>% 
+  mutate(BoroCT2010 = as.character(BoroCT2010))
+
+
+nbrhd_pops <- left_join(acs_pops,Neighborhood.key,by="BoroCT2010") %>% 
+  group_by(Neighborhood,Year) %>% 
+  summarize(
+    Population = sum(Population)
+    ,Borough = Borough[1]
+  ) %>% 
+  select(Borough,Neighborhood,Year,Population)
+
+## Forest Park is erroneously classfied as being in Brooklyn
+## assigning it to queens manually
+restr <- nbrhd_pops[,"Neighborhood"]=="Forest Park"
+nbrhd_pops[restr,"Borough"] <- "QUEENS"
+```
+
+Pluto is then used to find the number of residential units for NYC, Borough and Neighborhood levels
+
+``` r
+## Resi Units all nyc
+units_nyc <- as.numeric(pluto %>% 
+                          # filter(Borough=="BX") %>% 
+                          summarize(
+                            units=sum(UnitsRes)
+                          ))
+
+## Resi Units by borough
+units_borough <- pluto %>% 
+  group_by(Borough) %>% 
+  summarize(
+    units=sum(UnitsRes)
+  ) %>% 
+  mutate(Borough = as.character(factor(Borough
+                                       ,levels=c("BK","BX","MN","QN","SI")
+                                       ,labels=c("BROOKLYN","BRONX","MANHATTAN","QUEENS","STATEN ISLAND")
+  ))
+  )
+
+## Resi Units per Neighborhood 
+units_nbrhd <- pluto %>% 
+  group_by(Neighborhood) %>% 
+  summarize(units=sum(UnitsRes))
+```
+
+Prior to saving the base workspace, only the necessary items are kept.
+
+``` r
+## remove unnecessary items from workspace prior to saving
+rm(
+  list=ls()[!ls() %in% 
+              c("boro_pops","nbrhd_pops","units_nyc","units_borough","units_nbrhd"
+                ,"trash.descriptors","pest.descriptors","descriptor.levs"
+                ,"full.311","pluto","pedia.map")
+            ]
+)
+gc()
+```
+
+calculation
+===========
+
+This script is used for property specific calculations and is intended to be expanded upon liberally.
+
+First, load the base workspace set the target BBL, Borough and pull the lat/long for target BBLs. While the following shows only a single BBL the script is designed to accomodate a vector of BBLs as well.
+
+``` r
+## load the base workspace (includes munged 311 data linked w/ Neighborhood, pluto, populations and descriptors for 311 call types)
+load("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Data/311analysis_base_workspace.RData")
+
+## can also make this a list 
+curr.bbl <- "1_2054_92"
+
+# curr.boro <- as.character(pluto %>% 
+#   filter(BBL %in% curr.bbl) %>% 
+#   filter(!duplicated(Borough)) %>% 
+#   select(Borough))
+
+curr.boro <-"MANHATTAN"
+
+
+pluto.targets <- pluto %>% 
+  filter(!is.na(latitude)) %>% 
+  filter(BBL %in% curr.bbl) %>% 
+  select(latitude,longitude)
+```
+
+Find observations within both the 311 dataset as well as pluto that fall within 1/8 mile and 1/4 mile radiuses of the target BBLs
+
+``` r
+## put dummy variables for given radius around properties into dataframes 
+## generate list of 311 calls made within 1/8 mile radius
+radius_0.125_311 <- obs_within_radius.fun(
+  df = full.311 %>% 
+    filter(Borough %in% curr.boro | is.na(Borough)) %>% 
+    select(Unique.Key,Longitude,Latitude)
+  ,target.lats = pluto.targets[,"latitude"]
+  ,target.longs = pluto.targets[,"longitude"]
+  ,df_keycol = "Unique.Key"
+  ,mile.radius = .125
+  ,return_keys=T
+)
+
+## generate list of 311 calls made within 1/4 mile radius
+radius_0.25_311 <- obs_within_radius.fun(
+  df = full.311 %>% 
+    filter(Borough %in% curr.boro | is.na(Borough)) %>% 
+    select(Unique.Key,Longitude,Latitude)
+  ,target.lats = pluto.targets[,"latitude"]
+  ,target.longs = pluto.targets[,"longitude"]
+  ,df_keycol = "Unique.Key"
+  ,mile.radius = .25
+  ,return_keys=T
+)
+
+## generate list of BBLs within 1/8 mile radius
+radius_0.125_pluto <- obs_within_radius.fun(
+  df = pluto %>% 
+    filter(!is.na(longitude)) %>% 
+    select(BBL,longitude,latitude)
+  ,target.lats = pluto.targets[,"latitude"]
+  ,target.longs = pluto.targets[,"longitude"]
+  ,df_latcol = "latitude"
+  ,df_longcol = "longitude"
+  ,df_keycol = "BBL"
+  ,mile.radius = .125
+  ,return_keys=T
+)
+
+## generate list of BBLs within 1/4 mile radius
+radius_0.25_pluto <- obs_within_radius.fun(
+  df = pluto %>% 
+    filter(!is.na(longitude)) %>% 
+    select(BBL,longitude,latitude)
+  ,target.lats = pluto.targets[,"latitude"]
+  ,target.longs = pluto.targets[,"longitude"]
+  ,df_latcol = "latitude"
+  ,df_longcol = "longitude"
+  ,df_keycol = "BBL"
+  ,mile.radius = .25
+  ,return_keys=T
+)
+```
+
+Assign dummy variables to the 311 and pluto dataframes showing whether and observation is within a given radius. While not the most memory friendly method, this gives greater flexibility in prototyping and as such seems a preferred method if the script is to be built upon.
+
+``` r
+## create dummy variable columns indicating if calls fall within 1/4 mile radius or 1/8 mile radius
+full.311 <- full.311 %>% 
+  mutate(
+    radius_0.125 = ifelse((Unique.Key %in% radius_0.125_311)
+                          ,T
+                          ,F)
+    ,radius_0.25 = ifelse((Unique.Key %in% radius_0.25_311)
+                          ,T
+                          ,F)
+  )
+
+## create dummy variable columns indicating BBLs are within 1/4 mile radius or 1/8 mile radius
+pluto <- pluto %>% 
+  mutate(
+    radius_0.125 = ifelse((BBL %in% radius_0.125_pluto)
+                          ,T
+                          ,F)
+    ,radius_0.25 = ifelse((BBL %in% radius_0.25_pluto)
+                          ,T
+                          ,F)
+  )
+```
+
+Prior to running the sf population function, pull acs population data and corresponding shapefiles. The dropbox URLs below return lists of population data and shapefiles for years 2011-2015.
+
+``` r
+## Downloading ACS population data and shapefiles from dropbox link
+td <- tempdir()
+tf <- tempfile(tmpdir=td, fileext=".rds")
+download.file(
+  'https://www.dropbox.com/s/x9eyjm0ylragi89/acs.list.rds?raw=1',
+  destfile=tf,
+  method="auto"
+)
+
+acs_tract_pops.tmp <- readRDS(tf)
+
+unlink(tf)
+rm(tf)
+
+tf <- tempfile(tmpdir=td, fileext=".rds")
+download.file(
+  'https://www.dropbox.com/s/pecz2ep49lul743/ct_shape_2011_2015.list.rds?raw=1',
+  destfile=tf,
+  method="auto"
+)
+
+acs_tract_shapes.tmp <- readRDS(tf)
+
+unlink(tf)
+unlink(td)
+rm(tf,td)
+```
+
+Apply popradius.fun over the lists. Impute values for 2010 and 2016 by finding the mean yearly change. Do this for 1/4 mile radius as well.
+
+``` r
+## 1/8 mile population 
+pop_0.125_mi <- unlist(
+  lapply(1:length(acs_tract_pops.tmp), function(x)
+    popradius.fun(lat.bldg = pluto.targets[,"latitude"]
+                  ,long.bldg = pluto.targets[,"longitude"]
+                  ,acs_tract_pops = acs_tract_pops.tmp[[x]]
+                  ,acs_tract_shapes = acs_tract_shapes.tmp[[x]]
+                  ,mile.radius=.125
+    )
+  )
+)
+
+## Impute values for 2010 and 2016 by finding the mean yearly change
+pop_0.125_mi <- c(pop_0.125_mi[1] - mean(
+    unlist(
+      lapply(2:length(pop_0.125_mi), function(x)
+        pop_0.125_mi[x]-pop_0.125_mi[x-1]
+      )
+    )
+  )
+  ,pop_0.125_mi
+  ,pop_0.125_mi[5] + mean(
+    unlist(
+      lapply(2:length(pop_0.125_mi), function(x)
+        pop_0.125_mi[x]-pop_0.125_mi[x-1]
+      )
+    )
+  )
+)
+
+pop_0.125_mi <- as.data.frame(
+  cbind(
+    2010:2016
+    ,pop_0.125_mi
+  )
+)
+
+colnames(pop_0.125_mi) <- c("Year","Population")
+```
+
+Finding units within a given radius by simple filtering. Future iterations will have a function which apportions BBL residential units proportionately using mappluto shapefiles and possibly uses yearly unit counts. While BBLs likely fit neatly within neighborhood, they almost certainly do not fit neatly within a circle. That was given an intial test but abandoned after it became too time consuming to justify with more pressing issues at hand. Data exploration of results showed that population and residential units shared broadly similar trends indicating that this deficiency is not unduly problematic.
+
+``` r
+## units within radius 
+units_0.125mi <- as.numeric(pluto %>% 
+                              filter(radius_0.125) %>% 
+                              summarize(
+                                units = sum(UnitsRes)
+                              )
+)
+
+units_0.25mi <- as.numeric(pluto %>% 
+                             filter(radius_0.25) %>% 
+                             summarize(
+                               units = sum(UnitsRes)
+                             )
+)
+```
+
+### Calculation of call volume and proportions within geographic areas
+
+For each year, return the volume of complaint types within the radius
+
+``` r
+## units within radius 
+## 1/8 mile by year 
+radius_0.125_year.levs <- full.311 %>% 
+  mutate(Year = year(Created.Date)) %>% 
+  filter(radius_0.125==T) %>%
+  group_by(Year) %>% 
+  mutate(complaint.count = n()) %>%
+  group_by(Year,Complaint.Type,Descriptor) %>% 
+  summarize(
+    Descriptor.count = n()
+    ,Descriptor.prop = n()/mean(complaint.count,na.rm=T)
+    ,Complaint_count = mean(complaint.count,na.rm=T)
+  ) %>% 
+  arrange(desc(
+    Descriptor.count
+  )
+  ) %>% 
+  mutate(units = units_0.125mi
+         ,area="radius_0.125mi"
+         # ,Population = pop_0.125_mi
+         )
+```
+
+Pull the borough for the current radius. Have not yet had the problem of multiple boroughs being within a radius
+
+``` r
+radius_0.125_boro <- as.character(
+  pluto %>% 
+    filter(radius_0.125==T) %>% 
+    select(Borough) %>% 
+    filter(!duplicated(Borough))
+)
+
+if(length(radius_0.125_boro)==1){
+  radius_0.125_year.levs <- radius_0.125_year.levs %>% 
+    mutate(Borough=radius_0.125_boro)
+} else{
+  cat("More than one Borough in 500 foot radius, enter manually")
+}
+```
+
+Ranking call volume by complaint type and year is not strictly necessary here, but also helpful in looking at the data. So while a holdover from the exploratory script it is remaining for the moment. After ranking the call types joining with the previously calculated population for the area.
+
+``` r
+radius_0.125_year.levs <- radius_0.125_year.levs %>% 
+  group_by(Year) %>% 
+  arrange(desc(Descriptor.count)) %>% 
+  mutate(rank = 1:n()) %>% 
+  select(area,rank,everything()
+         # ,-complaint_type
+  ) %>% 
+  arrange(Year,rank)
+
+radius_0.125_year.levs <- left_join(
+  radius_0.125_year.levs
+  ,pop_0.125_mi
+  ,by="Year"
+)
+```
+
+Calculating the number of different call types by year. If the ranking from the previous code chunk is removed it will be necessary to uncomment the grouping command here.
+
+Units and population are passed into the summarize portion using mean. Total volume for each call type is found by way of filters for the previous counts. After volume is calculated, ratios of volume/unit and volume/population are calculated. Currently these are not used in the excel visualizations, but for R visualizations these numbers are useful.
+
+Repeat this for all desired radius sizes
+
+``` r
+radius_0.125_year.out <- radius_0.125_year.levs %>%
+  # group_by(Year) %>% 
+  summarize(
+    Area = "Radius_0.125mi"
+    ,units = mean(units)
+    ,Population = mean(Population)
+    
+    ,trashcall_count = sum(Descriptor.count[Descriptor %in% trash.descriptors])
+    ,heatcall_count = sum(Descriptor.count[grepl("heat",Complaint.Type,ignore.case=T) | grepl("heat",Descriptor,ignore.case=T)]) 
+    ,noisecall_count = sum(Descriptor.count[grepl("noise",Complaint.Type,ignore.case=T) | grepl("noise",Descriptor,ignore.case=T)]) 
+    ,grafcall_count = sum(Descriptor.count[grepl("Graffiti",Complaint.Type,ignore.case=T) | grepl("Graffiti",Descriptor,ignore.case=T)]) 
+    ,pestcall_count = sum(Descriptor.count[Descriptor %in% pest.descriptors])
+    
+    ,trashcall_unit.ratio = trashcall_count / units
+    ,trashcall_pop.ratio = trashcall_count / Population
+    ,heatcall_unit.ratio = heatcall_count / units
+    ,heatcall_pop.ratio = heatcall_count / Population
+    ,noisecall_unit.ratio = noisecall_count / units
+    ,noisecall_pop.ratio = noisecall_count / Population
+    ,grafcall_unit.ratio = grafcall_count / units
+    ,grafcall_pop.ratio = grafcall_count / Population
+    ,pestcall_unit.ratio = pestcall_count/units
+    ,pestcall_pop.ratio = pestcall_count/Population
+    ,AreaType = "Radius"
+  )
+```
+
+The same process is followed for neighborhood, borough and city levels.
+
+``` r
+## Neighborhood 
+nbrhd_year.levs <- full.311 %>% 
+  mutate(Year = year(Created.Date)) %>% 
+  group_by(Neighborhood,Year) %>% 
+  mutate(complaint_Neighborhood.count = n()) %>%
+  group_by(Neighborhood,Year,Complaint.Type,Descriptor) %>% 
+  summarize(
+    Descriptor.count = n()
+    ,Descriptor.prop_nbrhd = n()/mean(complaint_Neighborhood.count,na.rm=T)
+    ,Complaint_count = mean(complaint_Neighborhood.count,na.rm=T)
+  ) %>% 
+  arrange(desc(
+    Neighborhood
+    ,Descriptor.count
+  )
+  )
+
+nbrhd_year.levs <- left_join(nbrhd_year.levs
+                             ,units_nbrhd,by="Neighborhood")
+nbrhd_year.levs <- left_join(nbrhd_year.levs
+                             ,nbrhd_pops %>% 
+                               # filter(Year==2015) %>% 
+                               select(Neighborhood,Population,Year)
+                             ,by=c("Neighborhood","Year"))
+
+nbrhd_year.levs <- left_join(nbrhd_year.levs
+                             ,pluto %>% 
+                               filter(!is.na(Neighborhood) & !is.na(Borough) & !duplicated(Neighborhood)) %>% 
+                               select(Neighborhood,Borough)
+                             ,by="Neighborhood"
+) %>% 
+  select(Neighborhood,Borough,everything())
+
+nbrhd_year.levs <- nbrhd_year.levs %>% 
+  group_by(Neighborhood,Year) %>% 
+  arrange(desc(Descriptor.count)) %>% 
+  mutate(rank = 1:n()) %>% 
+  select(Neighborhood,rank,everything()
+         # ,-complaint_type
+  ) %>% 
+  arrange(Neighborhood,Year,rank)
+
+
+# nbrhd_year.out.hold <- nbrhd_year.out
+nbrhd_year.out <- nbrhd_year.levs %>%
+  summarize(
+    units = mean(units)
+    ,Population = mean(Population)
+
+    ,trashcall_count = sum(Descriptor.count[Descriptor %in% trash.descriptors])
+    ,heatcall_count = sum(Descriptor.count[grepl("heat",Complaint.Type,ignore.case=T) | grepl("heat",Descriptor,ignore.case=T)]) 
+    ,noisecall_count = sum(Descriptor.count[grepl("noise",Complaint.Type,ignore.case=T) | grepl("noise",Descriptor,ignore.case=T)]) 
+    ,grafcall_count = sum(Descriptor.count[grepl("Graffiti",Complaint.Type,ignore.case=T) | grepl("Graffiti",Descriptor,ignore.case=T)]) 
+    ,pestcall_count = sum(Descriptor.count[Descriptor %in% pest.descriptors])
+    
+    ,trashcall_unit.ratio = trashcall_count / units
+    ,trashcall_pop.ratio = trashcall_count / Population
+    ,heatcall_unit.ratio = heatcall_count / units
+    ,heatcall_pop.ratio = heatcall_count / Population
+    ,noisecall_unit.ratio = noisecall_count / units
+    ,noisecall_pop.ratio = noisecall_count / Population
+    ,grafcall_unit.ratio = grafcall_count / units
+    ,grafcall_pop.ratio = grafcall_count / Population
+    ,pestcall_unit.ratio = pestcall_count/units
+    ,pestcall_pop.ratio = pestcall_count/Population
+    ,AreaType = "Neighborhood"
+  ) %>% 
+  rename(Area = Neighborhood)
+```
+
+Finally, results are combined and output to CSV for manipulation in excel. Because complete 2017 data is not yet available it is simply removed.
+
+``` r
+## combine 
+year.out <- bind_rows(
+  nyc_year.out
+  ,boro_year.out
+  ,nbrhd_year.out
+  ,radius_0.25_year.out
+  ,radius_0.125_year.out
+) %>% 
+  filter(!Year %in% 2017 & !is.na(Area))
+
+write.csv(
+  year.out
+  ,file="/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Properties/48 St Nic/311_stats_48StNic.csv"
+  ,na=""
+  ,row.names=F
+)
+```
+
+Visualizations
+==============
+
+While code exists for R visualizations it has not yet been put into an easily reproducible script and pushed to Git.
