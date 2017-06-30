@@ -3,6 +3,8 @@
 
 This set of scripts outputs standardized 311 analysis for a given property. It is intended to be expanded significantly.
 
+Initial commit does not point to links where data can be downloaded. This will be updated shortly after work on the white paper is concluded.
+
 The first script "readin\_munge" ingests 311, PLUTO, ACS, Intercensal and pediacities shapefiles to create a standardized workspace from which 311 analyses are launched.
 
 The second script "calculation" generates summary statistics for varying geographies of interest: NYC, Borough, Neighborhood and both 1/4 mile and 1/8 mile radiuses around specified properties. It outputs total volume of calls per year, calls per person per year and calls per residential unit per year within the aforementioned geographic levels. Currently visualizations are handled in Excel.
