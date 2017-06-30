@@ -7,7 +7,6 @@ output:
 
 This set of scripts outputs standardized 311 analysis for a given property. It is intended to be expanded significantly.  
 
-
 Initial commit does not point to links where data can be downloaded. This will be updated shortly after work on the white paper is concluded.  
 
 The first script "readin_munge" ingests 311, PLUTO, ACS, Intercensal and pediacities shapefiles to create a standardized workspace from which 311 analyses are launched. 
