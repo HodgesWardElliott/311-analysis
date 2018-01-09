@@ -1,8 +1,7 @@
 
 ## property specific calculations for 311 analysis 
 
-
-setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data")
+setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/Major projects/311 data")
 
 library(tidyverse)
 library(sf)
@@ -14,15 +13,15 @@ library(data.table)
 
 options(scipen=999)
 
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/useful functions/HWE_FUNCTIONS.r")
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/useful functions/-.R")
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/useful functions/useful minor functions.R")
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Code/SF functions.R")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/HWE_FUNCTIONS.r")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/-.R")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/useful minor functions.R")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data/Code/SF functions.R")
 
 workspacename <- "Data/full311_testing"
 
 ## load the base workspace (includes munged 311 data linked w/ Neighborhood, pluto, populations and descriptors for 311 call types)
-load("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Data/311analysis_base_workspace.RData")
+load("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data/Data/311analysis_base_workspace.RData")
 
 ## can also make this a list 
 curr.bbl <- "1_2054_92"
@@ -646,7 +645,7 @@ year.out <- bind_rows(
 
 # write.csv(
 #   year.out
-#   ,file="/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Properties/48 St Nic/311_stats_48StNic.csv"
+#   ,file="/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/Major projects/311 data/Properties/48 St Nic/311_stats_48StNic.csv"
 #   ,na=""
 #   ,row.names=F
 # )

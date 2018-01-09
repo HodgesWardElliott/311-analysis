@@ -6,7 +6,7 @@
 ##
 ##################################################################################################################################
 
-setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data")
+setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data")
 
 library(tidyverse)
 library(sf)
@@ -14,12 +14,14 @@ library(geojsonio)
 library(lubridate)
 library(stringr)
 library(parallel)
+library(httr)
+library(readr)
 
 options(scipen=999)
 
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/useful functions/HWE_FUNCTIONS.r")
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/useful functions/-.R")
-source("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/useful functions/useful minor functions.R")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/HWE_FUNCTIONS.r")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/-.R")
+source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/useful minor functions.R")
 
 workspacename <- "Data/full311_testing"
 
@@ -41,51 +43,102 @@ pedia.map <- st_as_sf(pedia.map,crs=4326)
 ########################################################################
 
 ## Read in current 311 data
-tmp.df <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/ad_hoc/Bronx 1000/311data.rds") %>% 
-  filter(!is.na(Longitude) | is.na(Latitude)) %>% 
-  select(Unique.Key,Longitude,Latitude)
 
-tmp.df <- st_as_sf(tmp.df, coords = c("Longitude", "Latitude"), crs = 4326)
+## initial column names from API pull and desired column names 
+output_311_colnames <- c("Unique.Key"
+                         ,"Created.Date"
+                         ,"Agency"
+                         ,"Complaint.Type"
+                         ,"Descriptor"
+                         ,"Status"
+                         ,"Incident.Zip"
+                         ,"Incident.Address"
+                         ,"Street.Name"
+                         ,"City"
+                         ,"Borough"
+                         ,"Latitude"
+                         ,"Longitude"
+                         ,"Location")
 
-tmp.df <- st_join(tmp.df
-                  ,pedia.map) %>% 
-  select(Unique.Key,neighborhood)
+init_311_colnames <- gsub("\\.","_"
+                          ,tolower(
+                            output_311_colnames
+                          )
+)
+
+boro.vec <- c("MANHATTAN","BRONX","BROOKLYN","QUEENS","STATEN ISLAND")
+
+url_311 <- "https://data.cityofnewyork.us/resource/fhrw-4uyv.csv"
+
+# obs.lim <- 50000000
+obs.lim <- 1000000
+s.query <- paste("?$limit="
+                 ,obs.lim
+                 ,"&$select="
+                 ,paste(init_311_colnames,collapse=",")
+                 ,sep=""
+)
+
+nyc_311_httr.dl <- GET(paste(url_311
+                             # ,"?$limit=10000000"
+                             ,s.query
+                             ,sep=""
+)
+)
+
+full.311 <- read_csv(nyc_311_httr.dl$content
+                            ,col_types = cols(.default="c")
+) %>%
+  select_(.dots= init_311_colnames) %>%
+  setNames(output_311_colnames) %>%
+  filter(!(is.na(Longitude) | is.na(Latitude))) %>%
+  mutate(Unique.Key = as.integer(Unique.Key)
+         ,Created.Date = parse_date_time(
+           gsub("T.*","",Created.Date)
+           ,"!Y-!m-!d"
+           ,tz="EST"
+         )
+         ,Latitude = as.numeric(Latitude)
+         ,Longitude = as.numeric(Longitude)
+         ,Borough = trimws(Borough)
+         ,City = trimws(City)
+         ,Borough = ifelse(Borough == "Unspecified" & City %in% boro.vec
+                           ,City
+                           ,Borough)
+  )
+
+# object_sizes.fun()
+rm(nyc_311_httr.dl)
 gc()
 
-## bring back in the 311 data
-full.311 <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/ad_hoc/Bronx 1000/311data.rds") %>% 
-  filter(!is.na(Longitude)) %>% 
-  select(Unique.Key
-         ,Created.Date
-         ,Agency
-         ,Complaint.Type
-         ,Descriptor
-         ,Status
-         ,Incident.Zip
-         ,Incident.Address
-         ,Street.Name
-         ,City
-         ,Borough
-         ,Latitude
-         ,Longitude
-         ,Location)
+tmp.sf <- st_as_sf(full.311 %>% 
+                     select(Unique.Key,Longitude,Latitude)
+                   ,coords = c("Longitude", "Latitude"), crs = 4326)
+
+tmp.sf <- st_join(tmp.sf
+                  ,pedia.map %>%
+                    mutate(Borough.pedia = toupper(as.character(borough)))) %>% 
+  select(Unique.Key,neighborhood,Borough.pedia)
 
 full.311 <- left_join(full.311
-                      ,tmp.df %>% 
-                        select(Unique.Key,neighborhood)
+                      ,tmp.sf %>% 
+                        select(Unique.Key,neighborhood,Borough.pedia)
                       ,by="Unique.Key") %>% 
-  rename(Neighborhood = neighborhood)
+  rename(Neighborhood = neighborhood) %>%
+  mutate(Borough = ifelse((Borough %in% "Unspecified" | is.na(Borough))
+                          ,Borough.pedia
+                          ,Borough
+                          )) %>%
+  select(-Borough.pedia)
 
-full.311 <- full.311 %>% 
-  select(-geometry)
-
-rm(tmp.df)
-gc()
+full.311 <- as.data.frame(full.311 %>%
+                            filter(!is.na(Borough)) %>%
+                            select(-geometry))
 
 ## Read in pluto
 cl <- makeCluster(detectCores()-1,type="FORK")
 
-pluto.files <- list.files("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/nyc_pluto_16v2",
+pluto.files <- list.files("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/nyc_pluto_16v2",
                           pattern=".csv",
                           full.names=T)
 
@@ -140,54 +193,54 @@ pluto <- left_join(
   ,by="BBL"
 )
 
-# setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Data")
-# saveRDS(pluto,"pluto_v16.2_with_neighborhood.rds")
-rm(tmp.df)
-gc()
-
-## 311 data missing Borough in some instances 
-## Filling in the NA obs via pluto and neighborhood
-boro_pl.levs <- levels(factor(pluto[,"Borough"]))
-boro_311.levs <- levels(factor(full.311[,"Borough"]))
-boro_311.levs <- boro_311.levs[!boro_311.levs %in% "Unspecified"]
-
-boro_pl.levs.mat <- cbind(
-  substr(boro_pl.levs,start=1,stop=1)
-  ,substr(boro_pl.levs,start=2,stop=2)
-)
-
-boro_levs.match_order <- unlist(lapply(1:nrow(boro_pl.levs.mat), function(x){
-  which(
-    grepl(boro_pl.levs.mat[x,1],boro_311.levs,ignore.case=T) &
-      grepl(boro_pl.levs.mat[x,2],boro_311.levs,ignore.case=T)
-  )}
-)
-)
-
-full.311 <- left_join(
-  full.311
-  ,pluto %>% 
-    filter(!is.na(Neighborhood) & !is.na(Borough) & !duplicated(Neighborhood)) %>% 
-    mutate(Borough = factor(Borough 
-                            ,levels = boro_pl.levs
-                            ,labels = boro_311.levs[boro_levs.match_order])) %>%
-    select(Neighborhood,Borough) %>%
-    rename(Borough.pl = Borough)
-  ,by="Neighborhood")
-
-full.311 <- full.311 %>% 
-  mutate(
-    Borough.new = ifelse(
-      (Borough == "Unspecified" | is.na(Borough))
-      ,as.character(Borough.pl)
-      ,as.character(Borough)
-    )
-  ) %>% 
-  rename(Borough.orig = Borough
-         ,Borough = Borough.new) %>% 
-  select(-Borough.pl)
-
-# saveRDS(full.311,"311data_with_neighborhood.rds")
+# ## 311 data missing Borough in some instances 
+# ## Filling in the NA obs via pluto and neighborhood
+# 
+# boro_pl.levs <- pluto %>%
+#   filter(!duplicated(Borough)) %>%
+#   pull(Borough)
+# boro_311.levs <- full.311 %>%
+#   filter(!duplicated(Borough)) %>%
+#   pull(Borough)
+# boro_311.levs <- boro_311.levs[!boro_311.levs %in% "Unspecified" & !is.na(boro_311.levs)]
+# 
+# boro_pl.levs.mat <- cbind(
+#   substr(boro_pl.levs,start=1,stop=1)
+#   ,substr(boro_pl.levs,start=2,stop=2)
+# )
+# 
+# boro_levs.match_order <- unlist(lapply(1:nrow(boro_pl.levs.mat), function(x){
+#   which(
+#     grepl(boro_pl.levs.mat[x,1],boro_311.levs,ignore.case=T) &
+#       grepl(boro_pl.levs.mat[x,2],boro_311.levs,ignore.case=T)
+#   )}
+# )
+# )
+# 
+# full.311 <- left_join(
+#   full.311
+#   ,pluto %>% 
+#     filter(!is.na(Neighborhood) & !is.na(Borough) & !duplicated(Neighborhood)) %>% 
+#     mutate(Borough = factor(Borough 
+#                             ,levels = boro_pl.levs
+#                             ,labels = boro_311.levs[boro_levs.match_order])) %>%
+#     select(Neighborhood,Borough) %>%
+#     rename(Borough.pl = Borough)
+#   ,by="Neighborhood")
+# 
+# full.311 <- full.311 %>% 
+#   mutate(
+#     Borough.new = ifelse(
+#       (Borough == "Unspecified" | is.na(Borough))
+#       ,as.character(Borough.pl)
+#       ,as.character(Borough)
+#     )
+#   ) %>% 
+#   rename(Borough.orig = Borough
+#          ,Borough = Borough.new) %>% 
+#   select(-Borough.pl)
+# 
+# # saveRDS(full.311,"311data_with_neighborhood.rds")
 
 ## dataframe identifying all the different complaint types
 n_full.311 <- nrow(full.311)
@@ -247,23 +300,20 @@ pest.descriptors <- as.character(as.data.frame(descriptor.levs %>%
 ########################################################################
 
 ## Borough population 
-boro_pops <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/ad_hoc/Bronx 1000/Data/Borough Populations 2010_2016.csv"
-                      ,stringsAsFactors=F)
 
-colnames(boro_pops) <- gsub("\\."," ",colnames(boro_pops))
-
-boro_pops.list <- lapply(2:ncol(boro_pops), function(x){
-  out <- as.data.frame(cbind(boro_pops[,c(1,x)],colnames(boro_pops)[x])
-                       ,stringsAsFactors=F)
-  colnames(out) <- c("Year","Population","Borough")
-  return(out)
-}
-)
-
-boro_pops <- bind_rows(boro_pops.list)
+boro_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/Census/Population Estimates/Historical/neighborhood_boro_population_1970_2016_v2.rds") %>%
+  filter(neighborhood=="Borough" & Year >= 2010 & Source=="NY_opendata_PostCensal") %>%
+  mutate(Borough = toupper(Borough)
+         ,Borough = ifelse(Borough == "MAHATTAN"
+                           ,"MANHATTAN"
+                           ,Borough
+                           )
+         ,Population = Population.smooth
+         ) %>%
+  select(Year,Population,Borough)
 
 ## Neighborhood population 
-acs_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/Census/Population Estimates/ACS_Population_CT2010_2010_2015.rds")
+acs_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/Census/Population Estimates/ACS_Population_CT2010_2010_2015.rds")
 acs_pops <- acs_pops %>% 
   mutate(Population = as.numeric(Population)
   )
@@ -294,9 +344,10 @@ acs_pops.2016 <- left_join(acs_pops %>%
 acs_pops <- bind_rows(acs_pops,acs_pops.2016)
 
 ## Link table for acs tract and neighborhood 
-Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
+Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
                              stringsAsFactors=F) %>% 
-  mutate(BoroCT2010 = as.character(BoroCT2010))
+  mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
+  rename(Neighborhood = neighborhood)
 
 
 nbrhd_pops <- left_join(acs_pops,Neighborhood.key,by="BoroCT2010") %>% 
@@ -353,5 +404,17 @@ rm(
 )
 gc()
 
-# setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Major projects/311 data/Data")
+# setwd("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data/Data")
 # save.image("311analysis_base_workspace.RData")
+
+# save.image(
+#   paste(
+#     "311analysis_base_workspace "
+#     ,format(
+#       Sys.time()
+#       ,"%Y%m%d"
+#     )
+#     ,".RData"
+#     ,sep=""
+#   )
+)

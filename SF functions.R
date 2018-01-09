@@ -3,7 +3,6 @@
 ## Geospatial functions using SF for 311 analysis 
 ########################################################################
 
-
 ### Population within a given radius
 
 popradius.fun <- function(lat.bldg = 40.72432
@@ -210,10 +209,10 @@ obs_within_radius.fun <- function(target.lats
 ## Idea would be to apply a similar method to the tax lot polygons as to census tracts
 ## to get number of residential units within a given radius 
 
-# pluto_shp.bk <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/bk_mappluto_16v2/BKMapPLUTO.shp")
-# pluto_shape.qn <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/qn_mappluto_16v2/QNMapPLUTO.shp")
-# pluto_shape.mn <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/mn_mappluto_16v2/MNMapPLUTO.shp")
-# pluto_shape.bx <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/hodgeswardelliott Team Folder/Teams/Data/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/bx_mappluto_16v2/BXMapPLUTO.shp")
+# pluto_shp.bk <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/bk_mappluto_16v2/BKMapPLUTO.shp")
+# pluto_shape.qn <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/qn_mappluto_16v2/QNMapPLUTO.shp")
+# pluto_shape.mn <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/mn_mappluto_16v2/MNMapPLUTO.shp")
+# pluto_shape.bx <- st_read("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/nyc_pluto_16v2/mappluto/bx_mappluto_16v2/BXMapPLUTO.shp")
 # 
 # 
 # pluto_shape <- rbind(pluto_shape.mn
