@@ -70,8 +70,7 @@ boro.vec <- c("MANHATTAN","BRONX","BROOKLYN","QUEENS","STATEN ISLAND")
 
 url_311 <- "https://data.cityofnewyork.us/resource/fhrw-4uyv.csv"
 
-# obs.lim <- 50000000
-obs.lim <- 1000000
+obs.lim <- 50000000
 s.query <- paste("?$limit="
                  ,obs.lim
                  ,"&$select="
