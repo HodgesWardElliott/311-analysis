@@ -21,7 +21,7 @@ source("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachra
 workspacename <- "Data/full311_testing"
 
 ## load the base workspace (includes munged 311 data linked w/ Neighborhood, pluto, populations and descriptors for 311 call types)
-load("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data/Data/311analysis_base_workspace.RData")
+# load("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data/Data/311analysis_base_workspace.RData")
 
 ## can also make this a list 
 curr.bbl <- "1_2054_92"
@@ -130,7 +130,7 @@ pluto <- pluto %>%
 td <- tempdir()
 tf <- tempfile(tmpdir=td, fileext=".rds")
 download.file(
-  'https://www.dropbox.com/s/x9eyjm0ylragi89/acs.list.rds?raw=1',
+  'https://www.dropbox.com/s/iw5itfwt5pey7pu/acs.list.rds?raw=1',
   destfile=tf,
   method="auto"
 )
@@ -142,7 +142,7 @@ rm(tf)
 
 tf <- tempfile(tmpdir=td, fileext=".rds")
 download.file(
-  'https://www.dropbox.com/s/pecz2ep49lul743/ct_shape_2011_2015.list.rds?raw=1',
+  'https://www.dropbox.com/s/sbpc445yuvo1w8q/ct_shape_2011_2015.list.rds?raw=1',
   destfile=tf,
   method="auto"
 )
