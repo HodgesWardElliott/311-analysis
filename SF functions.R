@@ -68,7 +68,10 @@ popradius.fun <- function(lat.bldg = 40.72432
 }
 
 
-## find observations within a given radius 
+
+# Find observations within a given radius ---------------------------------
+
+
 obs_within_radius.fun <- function(target.lats
                                   ,target.longs
                                   ,df=full.311
@@ -83,7 +86,10 @@ obs_within_radius.fun <- function(target.lats
   
   ptm <- proc.time()
   
-  dat_sim <- data.frame(cbind(target.longs,target.lats))
+  df <- ungroup(df)
+
+  dat_sim <- data.frame(cbind(target.longs,target.lats)) %>%
+    setNames(c("target.longs","target.lats"))
   
   dat_sf <- st_as_sf(dat_sim, coords = c("target.longs", "target.lats"), crs = 4326) %>% 
     st_transform(3035)
@@ -95,20 +101,16 @@ obs_within_radius.fun <- function(target.lats
     )
   )
   
-  derp <- st_intersects(st_as_sf(df
-                                 , coords = c(df_longcol,df_latcol), crs = 4326) %>% 
-                          st_transform(3035)
+  tmp.sf <- st_as_sf(df
+                     , coords = c(df_longcol,df_latcol), crs = 4326) %>% 
+    st_transform(3035)
+  
+  derp <- st_intersects(tmp.sf
                         ,circle.map
                         ,sparse=F
   )
   
-  df[,
-     paste(
-       "radius"
-       ,mile.radius
-       ,sep=""
-     )
-     ] <- derp[,1]
+  df[,paste("radius",mile.radius,sep="")] <- derp[,1]
   
   cat("Time to find observations within radius:\n", (proc.time() - ptm)[3],sep="")
   if(return_keys==T){

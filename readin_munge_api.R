@@ -298,9 +298,23 @@ pest.descriptors <- as.character(as.data.frame(descriptor.levs %>%
 ## calculate population for geographies of interest 
 ########################################################################
 
+
 ## Borough population 
 
-boro_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/Census/Population Estimates/Historical/neighborhood_boro_population_1970_2016_v2.rds") %>%
+tf <- tempfile(tmpdir=td, fileext=".rds")
+download.file(
+  'https://www.dropbox.com/s/a4q6vsicrpqsryx/neighborhood_boro_population_1970_2016_v2.rds?raw=1',
+  destfile=tf,
+  method="auto"
+)
+
+boro_pops <- readRDS(tf)
+
+unlink(tf)
+unlink(td)
+rm(tf,td)
+
+boro_pops <- boro_pops %>%
   filter(neighborhood=="Borough" & Year >= 2010 & Source=="NY_opendata_PostCensal") %>%
   mutate(Borough = toupper(Borough)
          ,Borough = ifelse(Borough == "MAHATTAN"
@@ -312,7 +326,19 @@ boro_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Scien
   select(Year,Population,Borough)
 
 ## Neighborhood population 
-acs_pops <- readRDS("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/Census/Population Estimates/ACS_Population_CT2010_2010_2015.rds")
+tf <- tempfile(tmpdir=td, fileext=".rds")
+download.file(
+  'https://www.dropbox.com/s/bwqsoi8kocbfdya/ACS_Population_CT2010_2010_2015.rds?raw=1',
+  destfile=tf,
+  method="auto"
+)
+
+acs_pops <- readRDS(tf)
+
+unlink(tf)
+unlink(td)
+rm(tf,td)
+
 acs_pops <- acs_pops %>% 
   mutate(Population = as.numeric(Population)
   )
@@ -343,10 +369,29 @@ acs_pops.2016 <- left_join(acs_pops %>%
 acs_pops <- bind_rows(acs_pops,acs_pops.2016)
 
 ## Link table for acs tract and neighborhood 
-Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
+https://www.dropbox.com/s/iqcwdy6ecg27nd7/neighborhood_key.csv?dl=0
+
+
+tf <- tempfile(tmpdir=td, fileext=".rds")
+download.file(
+  'https://www.dropbox.com/s/bwqsoi8kocbfdya/ACS_Population_CT2010_2010_2015.rds?raw=1',
+  destfile=tf,
+  method="auto"
+)
+
+Neighborhood.key <- read.csv(tf,
                              stringsAsFactors=F) %>% 
   mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
   rename(Neighborhood = neighborhood)
+
+unlink(tf)
+unlink(td)
+rm(tf,td)
+
+# Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
+#                              stringsAsFactors=F) %>% 
+#   mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
+#   rename(Neighborhood = neighborhood)
 
 
 nbrhd_pops <- left_join(acs_pops,Neighborhood.key,by="BoroCT2010") %>% 
