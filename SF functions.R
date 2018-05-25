@@ -15,7 +15,8 @@ popradius.fun <- function(lat.bldg = 40.72432
   require(sf)
   require(dplyr)
   
-  dat_sim <- data.frame(cbind(long.bldg,lat.bldg))
+  dat_sim <- data.frame(cbind(long.bldg,lat.bldg)) %>%
+    setNames(c("long.bldg","lat.bldg"))
   
   dat_sf <- st_as_sf(dat_sim, coords = c("long.bldg", "lat.bldg"), crs = 4326) %>% 
     st_transform(3035)

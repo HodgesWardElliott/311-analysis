@@ -135,24 +135,26 @@ full.311 <- as.data.frame(full.311 %>%
                             select(-geometry))
 
 ## Read in pluto
-cl <- makeCluster(detectCores()-1,type="FORK")
 
-pluto.files <- list.files("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Data Sources/nyc_pluto_16v2",
-                          pattern=".csv",
-                          full.names=T)
+tmp.file <- tempfile()
+download.file("https://www.dropbox.com/s/438pxgo85s8iui2/pluto_lean_compressed_2003_2017.rds?raw=1",tmp.file)
 
-pluto.list <- parLapply(cl, pluto.files, function(x)
-  read.csv(x,
-           stringsAsFactors=F)
-  )
+pluto <- readRDS(tmp.file)
 
-stopCluster(cl)
+unlink(tmp.file)
+rm(tmp.file)
 
-pluto <- bind_rows(pluto.list) %>% 
-  select(BBL,Borough,Block,Lot,ZipCode,Address,SplitZone,BldgClass,LandUse,Easements,OwnerType,
+pluto.hold <- pluto
+pluto <- pluto.hold %>%
+  filter(Year == 2017) %>%
+  # filter(Year >= 2015) %>%
+  # arrange(desc(Year)) %>%
+  # filter(!(duplicated(BBL) & is.na(lat))) %>%
+  # filter(!duplicated(BBL)) %>%
+  select(BBL,Borough,Block,Lot,ZipCode,Address,BldgClass,LandUse,Easements,OwnerType,
          OwnerName,BldgArea,ComArea,ResArea,OfficeArea,RetailArea,GarageArea,StrgeArea,
-         FactryArea,OtherArea,AreaSource,NumBldgs,NumFloors,UnitsRes,UnitsTotal,YearBuilt,
-         CondoNo,XCoord,YCoord) %>% 
+         FactryArea,OtherArea,NumBldgs,NumFloors,UnitsRes,UnitsTotal,YearBuilt,
+         CondoNo,lat,lon) %>% 
   mutate(BBL= paste(substr(BBL,start=1,stop=1),
                     Block,
                     Lot,
@@ -162,32 +164,32 @@ pluto <- bind_rows(pluto.list) %>%
                          paste(str_sub(BBL,start=1,end=1),CondoNo,sep="_")),
          BldgClass_1 = str_sub(BldgClass,start=1,end=1)
   )
-rm(pluto.list)
+rm(pluto.hold)
 
 ## Adding neighborhood to pluto 
 tmp.df <- pluto %>% 
-  filter(!is.na(XCoord)) %>% 
-  select(BBL,XCoord,YCoord)
-tmp.df <- st_as_sf(tmp.df, coords = c("XCoord", "YCoord"), crs = 102718) %>% 
-  st_transform(4326)
+  filter(!is.na(lat)) %>% 
+  select(BBL,lat,lon)
 
-tmp.df <- st_join(tmp.df
+tmp.sf <- st_as_sf(tmp.df, coords = c("lon", "lat"), crs=4326)
+
+tmp.sf <- st_join(tmp.sf
                   ,pedia.map)
 
-tmp.df <- as.data.frame(
-  bind_cols(tmp.df
-            ,as.data.frame(st_coordinates(tmp.df))
-  )
-  ,stringsAsFactors=F) %>% 
-  rename(
-    latitude = Y
-    ,longitude = X
-  )
+# tmp.sf <- as.data.frame(
+#   bind_cols(tmp.sf
+#             ,as.data.frame(st_coordinates(tmp.sf))
+#   )
+#   ,stringsAsFactors=F) %>% 
+#   rename(
+#     latitude = Y
+#     ,longitude = X
+#   )
 
 pluto <- left_join(
   pluto
-  ,tmp.df %>% 
-    select(BBL,neighborhood,latitude,longitude) %>%
+  ,tmp.sf %>% 
+    select(BBL,neighborhood) %>%
     rename(Neighborhood = neighborhood)
   ,by="BBL"
 )
@@ -301,20 +303,23 @@ pest.descriptors <- as.character(as.data.frame(descriptor.levs %>%
 
 ## Borough population 
 
-tf <- tempfile(tmpdir=td, fileext=".rds")
+# tf <- tempfile(tmpdir=td, fileext=".rds")
+tf <- tempfile()
 download.file(
-  'https://www.dropbox.com/s/a4q6vsicrpqsryx/neighborhood_boro_population_1970_2016_v2.rds?raw=1',
-  destfile=tf,
-  method="auto"
+  # 'https://www.dropbox.com/s/a4q6vsicrpqsryx/neighborhood_boro_population_1970_2016_v2.rds?raw=1'
+  "https://www.dropbox.com/s/tjnfylaehkh780i/neighborhood_boro_population_1970_2017.csv?raw=1"
+  ,destfile=tf
+  ,method="auto"
 )
 
-boro_pops <- readRDS(tf)
+# boro_pops <- readRDS(tf)
+pops <-read_csv(tf)
 
 unlink(tf)
-unlink(td)
-rm(tf,td)
+# unlink(td)
+# rm(tf,td)
 
-boro_pops <- boro_pops %>%
+boro_pops <- pops %>%
   filter(neighborhood=="Borough" & Year >= 2010 & Source=="NY_opendata_PostCensal") %>%
   mutate(Borough = toupper(Borough)
          ,Borough = ifelse(Borough == "MAHATTAN"
@@ -326,88 +331,133 @@ boro_pops <- boro_pops %>%
   select(Year,Population,Borough)
 
 ## Neighborhood population 
-tf <- tempfile(tmpdir=td, fileext=".rds")
-download.file(
-  'https://www.dropbox.com/s/bwqsoi8kocbfdya/ACS_Population_CT2010_2010_2015.rds?raw=1',
-  destfile=tf,
-  method="auto"
-)
+# # tf <- tempfile(tmpdir=td, fileext=".rds")
+# tf <- tempfile()
+# download.file(
+#   'https://www.dropbox.com/s/bwqsoi8kocbfdya/ACS_Population_CT2010_2010_2015.rds?raw=1',
+#   destfile=tf,
+#   method="auto"
+# )
+# 
+# acs_pops <- readRDS(tf)
+# 
+# unlink(tf)
+# # unlink(td)
+# # rm(tf,td)
+# 
+# acs_pops <- acs_pops %>% 
+#   mutate(Population = as.numeric(Population)
+#   )
+# 
+# ## Inpute population for 2016 (2015 + average increase of prior two years)
+# acs_pops.tmp2 <- acs_pops %>% 
+#   filter(Year > 2012) %>%
+#   group_by(BoroCT2010) %>% 
+#   summarize(mean_increase = (Population[Year==max(Year)] - Population[Year==min(Year)])
+#             /(max(Year)-min(Year))) %>% 
+#   filter(!duplicated(BoroCT2010)) %>% 
+#   select(BoroCT2010,mean_increase)
+# 
+# acs_pops.2016 <- left_join(acs_pops %>% 
+#                              filter(Year==2015)
+#                            ,acs_pops.tmp2
+#                            ,by="BoroCT2010"
+# ) %>% mutate(
+#   mean_increase = ifelse(is.na(mean_increase)
+#                          ,0
+#                          ,mean_increase
+#   )
+#   ,Population = round(Population + mean_increase)
+#   ,Year=2016
+# ) %>% 
+#   select(-mean_increase)
+# 
+# acs_pops <- bind_rows(acs_pops,acs_pops.2016)
+# 
+# ## Link table for acs tract and neighborhood 
+# # https://www.dropbox.com/s/iqcwdy6ecg27nd7/neighborhood_key.csv?dl=0
+# 
+# 
+# tf <- tempfile(tmpdir=td, fileext=".rds")
+# download.file(
+#   'https://www.dropbox.com/s/bwqsoi8kocbfdya/ACS_Population_CT2010_2010_2015.rds?raw=1',
+#   destfile=tf,
+#   method="auto"
+# )
+# 
+# Neighborhood.key <- read.csv(tf,
+#                              stringsAsFactors=F) %>% 
+#   mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
+#   rename(Neighborhood = neighborhood)
+# 
+# unlink(tf)
+# unlink(td)
+# rm(tf,td)
+# 
+# Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
+#                              stringsAsFactors=F) %>%
+#   mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
+#   rename(Neighborhood = neighborhood)
+# 
+# 
+# nbrhd_pops <- left_join(acs_pops,Neighborhood.key,by="BoroCT2010") %>% 
+#   group_by(Neighborhood,Year) %>% 
+#   summarize(
+#     Population = sum(Population)
+#     ,Borough = Borough[1]
+#   ) %>% 
+#   select(Borough,Neighborhood,Year,Population)
+# 
+# ## Forest Park is erroneously classfied as being in Brooklyn
+# ## assigning it to queens manually
+# restr <- nbrhd_pops[,"Neighborhood"]=="Forest Park"
+# nbrhd_pops[restr,"Borough"] <- "QUEENS"
+# 
+# nbrhd_pops.hold <- nbrhd_pops
 
-acs_pops <- readRDS(tf)
+nbrhd_pops <- pops %>%
+  filter(neighborhood != "Borough" & Year >= 2010) %>%
+  mutate(Borough = toupper(Borough)
+         ,Neighborhood = neighborhood
+         ,Population = Population.smooth
+         ) %>%
+  select(Borough,Neighborhood,Year,Population) %>%
+  arrange(Neighborhood,Year)
 
-unlink(tf)
-unlink(td)
-rm(tf,td)
-
-acs_pops <- acs_pops %>% 
-  mutate(Population = as.numeric(Population)
-  )
-
-## Inpute population for 2016 (2015 + average increase of prior two years)
-acs_pops.tmp2 <- acs_pops %>% 
-  filter(Year > 2012) %>%
-  group_by(BoroCT2010) %>% 
+## calculate 2017 figure
+nbrhd_pops.tmp2 <- nbrhd_pops %>% 
+  filter(Year > 2013) %>%
+  group_by(Neighborhood) %>%
+  # filter(Neighborhood %in% "Astoria") %>%
   summarize(mean_increase = (Population[Year==max(Year)] - Population[Year==min(Year)])
             /(max(Year)-min(Year))) %>% 
-  filter(!duplicated(BoroCT2010)) %>% 
-  select(BoroCT2010,mean_increase)
+  filter(!duplicated(Neighborhood)) %>% 
+  select(Neighborhood,mean_increase)
 
-acs_pops.2016 <- left_join(acs_pops %>% 
-                             filter(Year==2015)
-                           ,acs_pops.tmp2
-                           ,by="BoroCT2010"
+# View(nbrhd_pops %>%
+#        filter(Neighborhood %in% "Astoria"))
+
+nbrhd_pops.2017 <- left_join(nbrhd_pops %>% 
+                             filter(Year==2016)
+                           ,nbrhd_pops.tmp2
+                           ,by="Neighborhood"
 ) %>% mutate(
   mean_increase = ifelse(is.na(mean_increase)
                          ,0
                          ,mean_increase
   )
   ,Population = round(Population + mean_increase)
-  ,Year=2016
+  ,Year=2017
 ) %>% 
   select(-mean_increase)
 
-acs_pops <- bind_rows(acs_pops,acs_pops.2016)
+nbrhd_pops <- bind_rows(nbrhd_pops,nbrhd_pops.2017) %>%
+  arrange(Neighborhood,Year)
 
-## Link table for acs tract and neighborhood 
-https://www.dropbox.com/s/iqcwdy6ecg27nd7/neighborhood_key.csv?dl=0
+# View(nbrhd_pops.hold)
+# View(nbrhd_pops)
 
-
-tf <- tempfile(tmpdir=td, fileext=".rds")
-download.file(
-  'https://www.dropbox.com/s/bwqsoi8kocbfdya/ACS_Population_CT2010_2010_2015.rds?raw=1',
-  destfile=tf,
-  method="auto"
-)
-
-Neighborhood.key <- read.csv(tf,
-                             stringsAsFactors=F) %>% 
-  mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
-  rename(Neighborhood = neighborhood)
-
-unlink(tf)
-unlink(td)
-rm(tf,td)
-
-# Neighborhood.key <- read.csv("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/UWS condo prop/Data/Neighborhood_key.csv",
-#                              stringsAsFactors=F) %>% 
-#   mutate(BoroCT2010 = as.character(BoroCT2010)) %>%
-#   rename(Neighborhood = neighborhood)
-
-
-nbrhd_pops <- left_join(acs_pops,Neighborhood.key,by="BoroCT2010") %>% 
-  group_by(Neighborhood,Year) %>% 
-  summarize(
-    Population = sum(Population)
-    ,Borough = Borough[1]
-  ) %>% 
-  select(Borough,Neighborhood,Year,Population)
-
-## Forest Park is erroneously classfied as being in Brooklyn
-## assigning it to queens manually
-restr <- nbrhd_pops[,"Neighborhood"]=="Forest Park"
-nbrhd_pops[restr,"Borough"] <- "QUEENS"
-
-
+# View(pops)
 
 ###############################################################################################################
 ## calculate units for geographies of interest  

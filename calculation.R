@@ -23,22 +23,25 @@ workspacename <- "Data/full311_testing"
 ## load the base workspace (includes munged 311 data linked w/ Neighborhood, pluto, populations and descriptors for 311 call types)
 # load("/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/Major projects/311 data/Data/311analysis_base_workspace.RData")
 
+pluto <- pluto %>% 
+rename(latitude = lat
+       ,longitude = lon)
+
 ## can also make this a list 
-curr.bbl <- "1_2054_92"
+# curr.bbl <- "1_2054_92"
+curr.bbl <- c("4_5185_17","4_5186_29")
 
 # curr.boro <- as.character(pluto %>% 
 #   filter(BBL %in% curr.bbl) %>% 
 #   filter(!duplicated(Borough)) %>% 
 #   select(Borough))
 
-curr.boro <-"MANHATTAN"
-
+curr.boro <-"QUEENS"
 
 pluto.targets <- pluto %>% 
   filter(!is.na(latitude)) %>% 
   filter(BBL %in% curr.bbl) %>% 
   select(latitude,longitude)
-
 
 
 ## put dummy variables for given radius around properties into dataframes 
@@ -78,7 +81,8 @@ radius_0.125_pluto <- obs_within_radius.fun(
   ,df_keycol = "BBL"
   ,mile.radius = .125
   ,return_keys=T
-)
+) %>%
+  pull(BBL)
 
 ## generate list of BBLs within 1/4 mile radius
 radius_0.25_pluto <- obs_within_radius.fun(
@@ -92,7 +96,8 @@ radius_0.25_pluto <- obs_within_radius.fun(
   ,df_keycol = "BBL"
   ,mile.radius = .25
   ,return_keys=T
-)
+) %>%
+  pull(BBL)
 
 
 ## create dummy variable columns indicating if calls fall within 1/4 mile radius or 1/8 mile radius
@@ -117,6 +122,19 @@ pluto <- pluto %>%
                           ,F)
   )
 
+pluto %>%
+  # filter(BBL %in% radius_0.125_pluto)
+filter(BBL == "4_5137_67")
+class(radius_0.125_pluto)
+
+
+pluto %>%
+  summarize(
+    radius_0.125_units = sum(UnitsRes[radius_0.125==T])
+    ,radius_0.125 = sum(BBL %in% radius_0.125_pluto)
+    ,radius_0.25_units = sum(UnitsRes[radius_0.25==T])
+    ,radius_0.25 = sum(radius_0.25)
+  )
 
 
 
@@ -127,12 +145,11 @@ pluto <- pluto %>%
 ## population 
 
 ## Downloading ACS population data and shapefiles from dropbox link
-td <- tempdir()
-tf <- tempfile(tmpdir=td, fileext=".rds")
+tf <- tempfile()
 download.file(
-  'https://www.dropbox.com/s/iw5itfwt5pey7pu/acs.list.rds?raw=1',
-  destfile=tf,
-  method="auto"
+  "https://www.dropbox.com/s/iw5itfwt5pey7pu/acs.list.rds?raw=1"
+  ,destfile=tf
+  ,method="auto"
 )
 
 acs_tract_pops.tmp <- readRDS(tf)
@@ -140,19 +157,17 @@ acs_tract_pops.tmp <- readRDS(tf)
 unlink(tf)
 rm(tf)
 
-tf <- tempfile(tmpdir=td, fileext=".rds")
+tf <- tempfile()
 download.file(
-  'https://www.dropbox.com/s/sbpc445yuvo1w8q/ct_shape_2011_2015.list.rds?raw=1',
-  destfile=tf,
-  method="auto"
+  # 'https://www.dropbox.com/s/sbpc445yuvo1w8q/ct_shape_2011_2015.list.rds?raw=1'
+  "https://www.dropbox.com/s/lyrv3r2wbexoqeq/ct_shape_2011_2016.list.rds?raw=1"
+  ,destfile=tf
+  ,method="auto"
 )
 
 acs_tract_shapes.tmp <- readRDS(tf)
 
 unlink(tf)
-unlink(td)
-rm(tf,td)
-
 
 
 ## first put in the manual calculations for units and population 
@@ -170,32 +185,32 @@ pop_0.125_mi <- unlist(
   )
 )
 
-## Impute values for 2010 and 2016 by finding the mean yearly change
+
+## Impute values for 2010 and 2017 by finding the mean yearly change
 pop_0.125_mi <- c(pop_0.125_mi[1] - mean(
-    unlist(
-      lapply(2:length(pop_0.125_mi), function(x)
-        pop_0.125_mi[x]-pop_0.125_mi[x-1]
-      )
-    )
-  )
-  ,pop_0.125_mi
-  ,pop_0.125_mi[5] + mean(
-    unlist(
-      lapply(2:length(pop_0.125_mi), function(x)
-        pop_0.125_mi[x]-pop_0.125_mi[x-1]
-      )
+  unlist(
+    lapply(2:length(pop_0.125_mi), function(x)
+      pop_0.125_mi[x]-pop_0.125_mi[x-1]
     )
   )
 )
+,pop_0.125_mi
+,pop_0.125_mi[length(pop_0.125_mi)] + mean(
+  unlist(
+    lapply(2:length(pop_0.125_mi), function(x)
+      pop_0.125_mi[x]-pop_0.125_mi[x-1]
+    )
+  )
+)
+)
 
-pop_0.125_mi <- as.data.frame(
-  cbind(
-    2010:2016
+pop_0.125_mi <- cbind(
+    2010:2017
     ,pop_0.125_mi
-  )
-)
+  ) %>%
+  as.data.frame() %>%
+  setNames(c("Year","Population"))
 
-colnames(pop_0.125_mi) <- c("Year","Population")
 
 ## 1/4 mile population 
 pop_0.25_mi <- unlist(
@@ -210,6 +225,7 @@ pop_0.25_mi <- unlist(
 )
 
 
+## Impute values for 2010 and 2017 by finding the mean yearly change
 pop_0.25_mi <- c(pop_0.25_mi[1] - mean(
   unlist(
     lapply(2:length(pop_0.25_mi), function(x)
@@ -218,7 +234,7 @@ pop_0.25_mi <- c(pop_0.25_mi[1] - mean(
   )
 )
 ,pop_0.25_mi
-,pop_0.25_mi[5] + mean(
+,pop_0.25_mi[length(pop_0.25_mi)] + mean(
   unlist(
     lapply(2:length(pop_0.25_mi), function(x)
       pop_0.25_mi[x]-pop_0.25_mi[x-1]
@@ -227,14 +243,12 @@ pop_0.25_mi <- c(pop_0.25_mi[1] - mean(
 )
 )
 
-pop_0.25_mi <- as.data.frame(
-  cbind(
-    2010:2016
-    ,pop_0.25_mi
-  )
-)
-
-colnames(pop_0.25_mi) <- c("Year","Population")
+pop_0.25_mi <- cbind(
+  2010:2017
+  ,pop_0.25_mi
+) %>%
+  as.data.frame() %>%
+  setNames(c("Year","Population"))
 
 
 ## units within radius 
@@ -281,7 +295,7 @@ radius_0.125_year.levs <- full.311 %>%
   mutate(units = units_0.125mi
          ,area="radius_0.125mi"
          # ,Population = pop_0.125_mi
-         )
+  )
 
 radius_0.125_boro <- as.character(
   pluto %>% 
@@ -358,7 +372,7 @@ radius_0.25_year.levs <- full.311 %>%
   mutate(units = units_0.25mi
          ,area="radius_0.25mi"
          # ,Population= pop_0.25_mi
-         )
+  )
 
 radius_0.25_boro <- as.character(
   pluto %>% 
@@ -463,7 +477,7 @@ nbrhd_year.out <- nbrhd_year.levs %>%
   summarize(
     units = mean(units)
     ,Population = mean(Population)
-
+    
     ,trashcall_count = sum(Descriptor.count[Descriptor %in% trash.descriptors])
     ,heatcall_count = sum(Descriptor.count[grepl("heat",Complaint.Type,ignore.case=T) | grepl("heat",Descriptor,ignore.case=T)]) 
     ,noisecall_count = sum(Descriptor.count[grepl("noise",Complaint.Type,ignore.case=T) | grepl("noise",Descriptor,ignore.case=T)]) 
@@ -604,7 +618,7 @@ nyc_year.levs <- left_join(nyc_year.levs
                              group_by(Year) %>% 
                              summarize(Population = sum(Population))
                            ,by="Year"
-                           )
+)
 
 # nyc_year.out.hold <- nyc_year.out
 nyc_year.out <- nyc_year.levs %>%
@@ -641,11 +655,11 @@ year.out <- bind_rows(
   ,radius_0.25_year.out
   ,radius_0.125_year.out
 ) %>% 
-  filter(!Year %in% 2017 & !is.na(Area))
+  filter(!Year %in% 2018 & !is.na(Area))
 
-# write.csv(
-#   year.out
-#   ,file="/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/useful functions/Major projects/311 data/Properties/48 St Nic/311_stats_48StNic.csv"
-#   ,na=""
-#   ,row.names=F
-# )
+write.csv(
+  year.out
+  ,file="/Users/billbachrach/Dropbox (hodgeswardelliott)/Data Science/Bill Bachrach/ad_hoc/Flushing - Ash and Beech/data/311_stats_48StNic.csv"
+  ,na=""
+  ,row.names=F
+)
